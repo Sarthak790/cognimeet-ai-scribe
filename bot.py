@@ -15,11 +15,11 @@ def join_meeting(meet_url: str):
         context = p.chromium.launch_persistent_context(
             user_data_dir=profile_path,
             headless=False, 
-            viewport={"width": 1280, "height": 720}, # 👈 Standard HD Viewport
+            viewport={"width": 1280, "height": 720}, 
             args=[
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--window-size=1280,720', # 👈 Forces the OS window to match perfectly
+                '--window-size=1280,720', 
                 '--use-fake-ui-for-media-stream',
                 '--use-fake-device-for-media-stream',
                 '--disable-audio-output',
@@ -30,84 +30,103 @@ def join_meeting(meet_url: str):
         
         page = context.pages[0] 
 
-        print(f"Navigating to {meet_url}...")
-        page.goto(meet_url)
-        time.sleep(4)
+        # ==========================================
+        # 📸 DEBUG CAMERA SETUP
+        # ==========================================
+        def debug_screenshot(filename="debug_crash.png"):
+            print(f"📸 Snapping debug screenshot: {filename}...")
+            try:
+                page.screenshot(path=filename)
+                s3_client = boto3.client(
+                    's3',
+                    aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                    aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+                    region_name=os.environ.get("AWS_REGION", "eu-north-1")
+                )
+                bucket = os.environ.get("AWS_BUCKET_NAME")
+                s3_client.upload_file(filename, bucket, filename)
+                print(f"✅ Uploaded to S3! Go look at '{filename}' in your AWS bucket.")
+            except Exception as e:
+                print(f"❌ Failed to take or upload screenshot: {e}")
 
-        if "workspace.google.com/products/meet" in page.url or "You can't join this video call" in page.content():
-            print("\n--- 🛑 GOOGLE BLOCKED US ---")
-            page.goto("https://accounts.google.com/")
-            time.sleep(120) 
+        # ==========================================
+        # 🤖 PHASE 1: JOINING THE MEETING
+        # ==========================================
+        try:
+            print(f"Step 1: Navigating to {meet_url}...")
+            page.goto(meet_url, timeout=60000)
+            time.sleep(5) # Give the heavy Google Meet UI time to load
+
+            if "workspace.google.com/products/meet" in page.url or "You can't join this video call" in page.content():
+                print("\n--- 🛑 GOOGLE BLOCKED US ---")
+                debug_screenshot("debug_google_blocked.png")
+                try: context.close() 
+                except: pass
+                return {"error": "Blocked by Google"}
+
+            print("Step 2: Muting Microphone and Camera...")
+            page.keyboard.press("Control+d") 
+            time.sleep(1)
+            page.keyboard.press("Control+e") 
+            time.sleep(1)
+
+            print("Step 3: Checking if Google Meet requires a name...")
+            try:
+                # Look for ANY text input box that might be the name field
+                name_input = page.locator('input[type="text"], input[aria-label="Your name"], input[placeholder="Your name"]').first
+                name_input.wait_for(state="visible", timeout=5000)
+                name_input.fill("CogniMeet Bot")
+                print("✅ Filled in anonymous name!")
+                time.sleep(1.5) # Crucial: Wait for the button to unlock
+            except Exception:
+                print("No name input required. Proceeding...")
+
+            print("Step 4: Looking for 'Ask to join' button...")
+            try:
+                join_button = page.locator('button:has-text("Ask to join"), button:has-text("Join now")').first
+                join_button.wait_for(state="visible", timeout=10000)
+                join_button.click()
+                print("🚪 Knocked on the door! (PLEASE ADMIT THE BOT FROM YOUR HOST ACCOUNT)")
+            except Exception as e:
+                print(f"❌ Could not find the Join button.")
+                debug_screenshot("debug_join_button_missing.png")
+                raise e # Force it into the crash handler
+
+            print("Step 5: ⏳ Waiting to be admitted... (Timeout in 60 seconds)")
+            try:
+                hangup_button = page.locator('button[aria-label*="Leave call" i]')
+                hangup_button.wait_for(state="visible", timeout=60000)
+                print("✅ Successfully entered the meeting room!")
+            except Exception:
+                print("❌ Bot was not admitted in time. Leaving.")
+                debug_screenshot("debug_not_admitted.png")
+                try: context.close() 
+                except: pass
+                return {"error": "Not admitted"}
+
+        except Exception as crash_error:
+            print(f"❌ CRITICAL CRASH DURING JOIN SEQUENCE: {crash_error}")
+            debug_screenshot("debug_critical_crash.png")
             try: context.close() 
             except: pass
-            return
-
-        print("Muting Microphone and Camera...")
-        page.keyboard.press("Control+d") 
-        time.sleep(1)
-        page.keyboard.press("Control+e") 
-        time.sleep(1)
-
-        print("Looking for Join button...")
-        try:
-            name_input = page.get_by_placeholder("Your name")
-            if not name_input.is_visible():
-                name_input = page.locator('input[aria-label="Your name"]')
-            if name_input.is_visible():
-                name_input.fill("Summary Bot")
-        except Exception:
-            pass 
-        print("Checking if Google Meet requires a name...")
-        try:
-            # Wait up to 5 seconds to see if the "What's your name?" box appears
-            name_input = page.locator('input[type="text"]')
-            name_input.wait_for(state="visible", timeout=5000)
-            
-            # If it appears, type the bot's name
-            name_input.fill("CogniMeet Bot")
-            print("✅ Filled in anonymous name!")
-            time.sleep(1) # Give the UI a second to unlock the join button
-        except Exception:
-            print("No name input required. Proceeding...")
-
-        try:
-            join_button = page.locator('button:has-text("Ask to join"), button:has-text("Join now")').first
-            join_button.wait_for(state="visible", timeout=15000)
-            join_button.click()
-            print("🚪 Knocked on the door! (PLEASE ADMIT THE BOT FROM YOUR HOST ACCOUNT)")
-        except Exception as e:
-            print(f"Could not find the Join button. Error: {e}")
-
-        print("⏳ Waiting to be admitted... (Timeout in 60 seconds)")
-        try:
-            hangup_button = page.locator('button[aria-label*="Leave call" i]')
-            hangup_button.wait_for(state="visible", timeout=60000)
-            print("✅ Successfully entered the meeting room!")
-        except Exception:
-            print("❌ Bot was not admitted in time. Leaving.")
-            try: context.close() 
-            except: pass
-            return {"error": "Not admitted"}
+            return {"error": str(crash_error)}
         
         time.sleep(3)
         
-        # --- ROBUST CAPTIONS FIX ---
-        # --- ROBUST CAPTIONS FIX ---
+        # ==========================================
+        # 🎙️ PHASE 2: CAPTIONS AND TRANSCRIPTION
+        # ==========================================
         print("Checking caption status...")
         try:
-            # 1. Wiggle the mouse to the center of the 720p screen
             page.mouse.move(100, 100)
             time.sleep(0.5)
-            page.mouse.move(640, 360) # 👈 New center coordinates
+            page.mouse.move(640, 360) 
             time.sleep(1)
 
-            # 2. Find ANY button with "caption" in the label (fuzzy match)
             caption_button = page.locator('button[aria-label*="caption" i]').first
             caption_button.wait_for(state="visible", timeout=3000)
 
-            # 3. Read the actual label to see if they are already on
             label = caption_button.get_attribute("aria-label").lower()
-            
             if "turn off" in label:
                 print("✅ Captions were already enabled!")
             elif "turn on" in label:
@@ -115,12 +134,11 @@ def join_meeting(meet_url: str):
                 print("✅ Clicked CC button via UI!")
         except Exception as e:
             print(f"UI Button failed, forcing shortcut: {e}")
-            page.mouse.click(640, 360) # 👈 New center coordinates
+            page.mouse.click(640, 360) 
             time.sleep(0.5)
             page.keyboard.press("c")
             print("✅ Used shortcut 'c' fallback!")
         
-
         time.sleep(2)
 
         print("\n=== 🎙️ LISTENING TO MEETING ===")
@@ -129,29 +147,24 @@ def join_meeting(meet_url: str):
         last_text = ""
         NOISE_WORDS = ["language", "English", "format_size", "Font size", "circle", "Font color", "settings", "Open caption settings"]
         
-        # --- SMART LIFESPAN FIX ---
         start_time = time.time()
-        max_duration = 10 * 60  # 10 minutes in seconds
+        max_duration = 10 * 60  
         
         with open("transcript.txt", "w", encoding="utf-8") as f:
             while True:
-                # 1. Check if 10 minutes have passed
                 elapsed_time = time.time() - start_time
                 if elapsed_time > max_duration:
                     print("\n⏱️ 10-minute maximum reached. Bot is packing up.")
                     break
                 
-                # 2. Check if the meeting ended (host kicked bot or ended call for all)
                 try:
                     if not hangup_button.is_visible():
                         print("\n🚪 Meeting ended or bot was removed. Packing up early!")
                         break
                 except Exception:
-                    # If checking the button throws an error, the browser tab closed.
                     print("\n🚪 Browser tab closed unexpectedly. Packing up early!")
                     break
 
-                # 3. Scrape Text
                 try:
                     captions_elements = page.locator('.CNusmb, .iTTPOb, .a4cQT').all_inner_texts()
                     if captions_elements:
@@ -177,7 +190,7 @@ def join_meeting(meet_url: str):
     # ==========================================
     # 🧠 PHASE 3: AI SUMMARIZATION & CLOUD STORAGE
     # ==========================================
-    print("\n=== 🧠 SENDING DATA TO GEMINI FOR SUMMARIZATION ===")
+    print("\n=== 🧠 SENDING DATA TO GEMINI ===")
     
     try:
         with open("transcript.txt", "r", encoding="utf-8") as f:
@@ -221,7 +234,6 @@ def join_meeting(meet_url: str):
         with open("summary.txt", "w", encoding="utf-8") as f:
             f.write(ai_summary)
             
-        # --- AWS S3 UPLOAD ---
         print("☁️ Uploading summary to AWS S3...")
         try:
             s3_client = boto3.client(

@@ -1,0 +1,21 @@
+# Secrets
+.env
+.env.local
+
+# Databases
+users.db
+
+# Browser & Temp Data
+bot_profile/
+transcript.txt
+summary.txt
+
+# Python Virtual Environments & Cache
+__pycache__/
+.venv/
+venv/
+*.pyc
+
+# Node/Next.js UI
+meet-scribe-ui/node_modules/
+meet-scribe-ui/.next/

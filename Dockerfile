@@ -13,5 +13,5 @@ COPY . .
 # Expose the port FastAPI uses
 EXPOSE 8000
 
-# Start the server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start the server with a fake virtual monitor (xvfb-run)
+CMD ["xvfb-run", "-a", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

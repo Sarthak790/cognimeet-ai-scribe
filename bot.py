@@ -57,6 +57,18 @@ def join_meeting(meet_url: str):
                 name_input.fill("Summary Bot")
         except Exception:
             pass 
+        print("Checking if Google Meet requires a name...")
+        try:
+            # Wait up to 5 seconds to see if the "What's your name?" box appears
+            name_input = page.locator('input[type="text"]')
+            name_input.wait_for(state="visible", timeout=5000)
+            
+            # If it appears, type the bot's name
+            name_input.fill("CogniMeet Bot")
+            print("✅ Filled in anonymous name!")
+            time.sleep(1) # Give the UI a second to unlock the join button
+        except Exception:
+            print("No name input required. Proceeding...")
 
         try:
             join_button = page.locator('button:has-text("Ask to join"), button:has-text("Join now")').first

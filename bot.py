@@ -54,7 +54,7 @@ def join_meeting(meet_url: str):
         # ==========================================
         try:
             print(f"Step 1: Navigating to {meet_url}...")
-            page.goto(meet_url, timeout=60000)
+            page.goto(meet_url, timeout=60000, wait_until="domcontentloaded")
             time.sleep(5) # Give the heavy Google Meet UI time to load
 
             if "workspace.google.com/products/meet" in page.url or "You can't join this video call" in page.content():

@@ -17,6 +17,8 @@ def join_meeting(meet_url: str):
             headless=False, 
             viewport={"width": 1280, "height": 720}, # 👈 Standard HD Viewport
             args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
                 '--window-size=1280,720', # 👈 Forces the OS window to match perfectly
                 '--use-fake-ui-for-media-stream',
                 '--use-fake-device-for-media-stream',
